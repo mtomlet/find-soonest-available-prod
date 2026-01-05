@@ -39,7 +39,7 @@ const CONFIG = {
 };
 
 // HARD-CODED: Default service (Men's Haircut in production)
-const DEFAULT_SERVICE_ID = '480b1fd6-1c42-4c8a-add3-a7600102a9b1';
+const DEFAULT_SERVICE_ID = 'f9160450-0b51-4ddc-bcc7-ac150103d5c0';  // PRODUCTION: Haircut Standard
 
 // PRODUCTION All stylists at Phoenix Encanto
 const ALL_STYLISTS = [
