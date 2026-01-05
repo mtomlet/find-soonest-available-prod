@@ -1,0 +1,13 @@
+{
+  "name": "find-soonest-available-prod",
+  "version": "1.0.0",
+  "description": "PRODUCTION - Hard-coded soonest availability scanner for Phoenix Encanto",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "axios": "^1.6.2"
+  }
+}
