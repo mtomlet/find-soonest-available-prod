@@ -41,6 +41,32 @@ const CONFIG = {
 // HARD-CODED: Default service (Men's Haircut in production)
 const DEFAULT_SERVICE_ID = 'f9160450-0b51-4ddc-bcc7-ac150103d5c0';  // PRODUCTION: Haircut Standard
 
+// PRODUCTION Service IDs (Phoenix Encanto) - for add-on resolution
+const SERVICE_MAP = {
+  'haircut_standard': 'f9160450-0b51-4ddc-bcc7-ac150103d5c0',
+  'haircut standard': 'f9160450-0b51-4ddc-bcc7-ac150103d5c0',
+  'standard': 'f9160450-0b51-4ddc-bcc7-ac150103d5c0',
+  'haircut': 'f9160450-0b51-4ddc-bcc7-ac150103d5c0',
+  'haircut_skin_fade': '14000cb7-a5bb-4a26-9f23-b0f3016cc009',
+  'skin_fade': '14000cb7-a5bb-4a26-9f23-b0f3016cc009',
+  'skin fade': '14000cb7-a5bb-4a26-9f23-b0f3016cc009',
+  'fade': '14000cb7-a5bb-4a26-9f23-b0f3016cc009',
+  'long_locks': '721e907d-fdae-41a5-bec4-ac150104229b',
+  'long locks': '721e907d-fdae-41a5-bec4-ac150104229b',
+  'wash': '67c644bc-237f-4794-8b48-ac150106d5ae',
+  'shampoo': '67c644bc-237f-4794-8b48-ac150106d5ae',
+  'grooming': '65ee2a0d-e995-4d8d-a286-ac150106994b',
+  'beard': '65ee2a0d-e995-4d8d-a286-ac150106994b',
+  'beard_trim': '65ee2a0d-e995-4d8d-a286-ac150106994b'
+};
+
+// Helper to resolve service name to ID
+function resolveServiceId(input) {
+  if (!input) return null;
+  if (input.includes('-') && input.length > 30) return input;
+  return SERVICE_MAP[input.toLowerCase().trim()] || null;
+}
+
 // PRODUCTION All stylists at Phoenix Encanto
 const ALL_STYLISTS = [
   { id: '159793cd-bf26-4574-afcd-ac08017f2cf8', name: 'Joshua Thorsvik' },
@@ -98,14 +124,34 @@ app.post('/find-soonest', async (req, res) => {
   // HARD-CODED: Default service (haircut)
   const serviceId = DEFAULT_SERVICE_ID;
 
+  // Optional: additional_services for add-ons (wash, grooming)
+  const { additional_services } = req.body || {};
+  let addonServiceIds = [];
+  if (additional_services && Array.isArray(additional_services)) {
+    addonServiceIds = additional_services
+      .map(s => resolveServiceId(s))
+      .filter(s => s !== null);
+  }
+
   console.log(`PRODUCTION: Scanning all ${ALL_STYLISTS.length} barbers for soonest availability...`);
   console.log(`Date range: ${startDate} to ${endDate} (hard-coded 3 days)`);
   console.log(`Service: ${serviceId} (hard-coded)`);
+  if (addonServiceIds.length > 0) {
+    console.log(`Add-on services: ${addonServiceIds.join(', ')}`);
+  }
 
   try {
     const token = await getMeevoToken();
 
     const scanPromises = ALL_STYLISTS.map(async (stylist) => {
+      // Build ScanServices array - primary service + any add-ons
+      const scanServices = [{ ServiceId: serviceId, EmployeeIds: [stylist.id] }];
+
+      // Add any add-on services to find slots that fit the full package
+      for (const addonId of addonServiceIds) {
+        scanServices.push({ ServiceId: addonId, EmployeeIds: [stylist.id] });
+      }
+
       const scanRequest = {
         LocationId: parseInt(CONFIG.LOCATION_ID),
         TenantId: parseInt(CONFIG.TENANT_ID),
@@ -115,10 +161,7 @@ app.post('/find-soonest', async (req, res) => {
         ScanTimeType: 1,
         StartTime: '00:00',
         EndTime: '23:59',
-        ScanServices: [{
-          ServiceId: serviceId,
-          EmployeeIds: [stylist.id]
-        }]
+        ScanServices: scanServices
       };
 
       try {
@@ -204,7 +247,8 @@ app.get('/health', (req, res) => {
     environment: 'PRODUCTION',
     location: 'Phoenix Encanto',
     service: 'Find Soonest Available',
-    description: 'Hard-coded: scans all barbers, now to 3 days out, no input required',
+    version: '1.1.0',
+    description: 'Hard-coded: scans all barbers, now to 3 days out. Supports additional_services for add-ons.',
     stylists_count: ALL_STYLISTS.length
   });
 });
