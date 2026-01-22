@@ -67,6 +67,51 @@ function resolveServiceId(input) {
   return SERVICE_MAP[input.toLowerCase().trim()] || null;
 }
 
+// ============================================
+// DATE FORMATTING HELPERS
+// Pre-formatted strings so LLM doesn't do date math
+// ============================================
+
+const DAYS_OF_WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
+                'July', 'August', 'September', 'October', 'November', 'December'];
+
+function getOrdinalSuffix(day) {
+  if (day > 3 && day < 21) return 'th';
+  switch (day % 10) {
+    case 1: return 'st';
+    case 2: return 'nd';
+    case 3: return 'rd';
+    default: return 'th';
+  }
+}
+
+function formatDateParts(dateString) {
+  const date = new Date(dateString + (dateString.includes('T') ? '' : 'T12:00:00'));
+  const dayOfWeek = DAYS_OF_WEEK[date.getUTCDay()];
+  const month = MONTHS[date.getUTCMonth()];
+  const dayNum = date.getUTCDate();
+  const dayWithSuffix = `${dayNum}${getOrdinalSuffix(dayNum)}`;
+  return {
+    day_of_week: dayOfWeek,
+    formatted_date: `${month} ${dayWithSuffix}`,
+    formatted_full_date: `${dayOfWeek}, ${month} ${dayWithSuffix}`
+  };
+}
+
+function formatTime(timeString) {
+  const timePart = timeString.split('T')[1];
+  if (!timePart) return 'Time unavailable';
+  const [hourStr, minStr] = timePart.split(':');
+  let hours = parseInt(hourStr, 10);
+  const minutes = parseInt(minStr, 10);
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  hours = hours ? hours : 12;
+  const minutesStr = minutes < 10 ? '0' + minutes : minutes;
+  return `${hours}:${minutesStr} ${ampm}`;
+}
+
 // PRODUCTION All stylists at Phoenix Encanto
 const ALL_STYLISTS = [
   { id: '159793cd-bf26-4574-afcd-ac08017f2cf8', name: 'Joshua Thorsvik' },
@@ -178,16 +223,24 @@ app.post('/find-soonest', async (req, res) => {
 
         const rawData = response.data?.data || [];
         return rawData.flatMap(item =>
-          (item.serviceOpenings || []).map(slot => ({
-            startTime: slot.startTime,
-            endTime: slot.endTime,
-            date: slot.date,
-            employee_id: stylist.id,
-            employee_name: stylist.name,
-            serviceId: slot.serviceId,
-            serviceName: slot.serviceName,
-            price: slot.employeePrice
-          }))
+          (item.serviceOpenings || []).map(slot => {
+            const dateParts = formatDateParts(slot.startTime);
+            const formattedTime = formatTime(slot.startTime);
+            return {
+              startTime: slot.startTime,
+              endTime: slot.endTime,
+              date: slot.date,
+              employee_id: stylist.id,
+              employee_name: stylist.name,
+              serviceId: slot.serviceId,
+              serviceName: slot.serviceName,
+              price: slot.employeePrice,
+              day_of_week: dateParts.day_of_week,
+              formatted_date: dateParts.formatted_date,
+              formatted_time: formattedTime,
+              formatted_full: `${dateParts.formatted_full_date} at ${formattedTime}`
+            };
+          })
         );
 
       } catch (error) {
@@ -223,13 +276,17 @@ app.post('/find-soonest', async (req, res) => {
         end_time: earliest.endTime,
         employee_id: earliest.employee_id,
         employee_name: earliest.employee_name,
-        service_id: serviceId
+        service_id: serviceId,
+        day_of_week: earliest.day_of_week,
+        formatted_date: earliest.formatted_date,
+        formatted_time: earliest.formatted_time,
+        formatted_full: earliest.formatted_full
       },
       total_openings_found: allOpenings.length,
       barbers_scanned: ALL_STYLISTS.length,
       date_range: { start: startDate, end: endDate },
       all_openings: allOpenings.slice(0, 20),
-      message: `Next available: ${earliest.startTime} with ${earliest.employee_name}`
+      message: `Next available: ${earliest.formatted_full} with ${earliest.employee_name}`
     });
 
   } catch (error) {
@@ -247,8 +304,9 @@ app.get('/health', (req, res) => {
     environment: 'PRODUCTION',
     location: 'Phoenix Encanto',
     service: 'Find Soonest Available',
-    version: '1.1.0',
+    version: '1.2.0',
     description: 'Hard-coded: scans all barbers, now to 3 days out. Supports additional_services for add-ons.',
+    features: ['formatted date fields (day_of_week, formatted_date, formatted_time, formatted_full)'],
     stylists_count: ALL_STYLISTS.length
   });
 });
