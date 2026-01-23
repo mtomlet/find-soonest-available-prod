@@ -211,6 +211,16 @@ app.post('/find-soonest', async (req, res) => {
       console.log(`Add-on services: ${addonServiceIds.join(', ')}`);
     }
 
+    // Use smaller 3-hour time windows to bypass Meevo's 8-slot limit
+    const TIME_WINDOWS = [
+      { start: '00:00', end: '09:00' },
+      { start: '09:00', end: '12:00' },
+      { start: '12:00', end: '15:00' },
+      { start: '15:00', end: '18:00' },
+      { start: '18:00', end: '21:00' },
+      { start: '21:00', end: '23:59' }
+    ];
+
     const scanPromises = activeStylists.map(async (stylist) => {
       // Build ScanServices array - primary service + any add-ons
       const scanServices = [{ ServiceId: serviceId, EmployeeIds: [stylist.id] }];
@@ -220,56 +230,68 @@ app.post('/find-soonest', async (req, res) => {
         scanServices.push({ ServiceId: addonId, EmployeeIds: [stylist.id] });
       }
 
-      const scanRequest = {
-        LocationId: parseInt(CONFIG.LOCATION_ID),
-        TenantId: parseInt(CONFIG.TENANT_ID),
-        ScanDateType: 1,
-        StartDate: startDate,
-        EndDate: endDate,
-        ScanTimeType: 1,
-        StartTime: '00:00',
-        EndTime: '23:59',
-        ScanServices: scanServices
-      };
+      // Scan all time windows in parallel for this stylist
+      const windowScans = TIME_WINDOWS.map(async (window) => {
+        const scanRequest = {
+          LocationId: parseInt(CONFIG.LOCATION_ID),
+          TenantId: parseInt(CONFIG.TENANT_ID),
+          ScanDateType: 1,
+          StartDate: startDate,
+          EndDate: endDate,
+          ScanTimeType: 1,
+          StartTime: window.start,
+          EndTime: window.end,
+          ScanServices: scanServices
+        };
 
-      try {
-        const response = await axios.post(
-          `${CONFIG.API_URL_V2}/scan/openings?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}`,
-          scanRequest,
-          {
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
+        try {
+          const response = await axios.post(
+            `${CONFIG.API_URL_V2}/scan/openings?TenantId=${CONFIG.TENANT_ID}&LocationId=${CONFIG.LOCATION_ID}`,
+            scanRequest,
+            {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
             }
-          }
-        );
+          );
 
-        const rawData = response.data?.data || [];
-        return rawData.flatMap(item =>
-          (item.serviceOpenings || []).map(slot => {
-            const dateParts = formatDateParts(slot.startTime);
-            const formattedTime = formatTime(slot.startTime);
-            return {
-              startTime: slot.startTime,
-              endTime: slot.endTime,
-              date: slot.date,
-              employee_id: stylist.id,
-              employee_name: stylist.name,
-              serviceId: slot.serviceId,
-              serviceName: slot.serviceName,
-              price: slot.employeePrice,
-              day_of_week: dateParts.day_of_week,
-              formatted_date: dateParts.formatted_date,
-              formatted_time: formattedTime,
-              formatted_full: `${dateParts.formatted_full_date} at ${formattedTime}`
-            };
-          })
-        );
+          const rawData = response.data?.data || [];
+          return rawData.flatMap(item =>
+            (item.serviceOpenings || []).map(slot => {
+              const dateParts = formatDateParts(slot.startTime);
+              const formattedTime = formatTime(slot.startTime);
+              return {
+                startTime: slot.startTime,
+                endTime: slot.endTime,
+                date: slot.date,
+                employee_id: stylist.id,
+                employee_name: stylist.name,
+                serviceId: slot.serviceId,
+                serviceName: slot.serviceName,
+                price: slot.employeePrice,
+                day_of_week: dateParts.day_of_week,
+                formatted_date: dateParts.formatted_date,
+                formatted_time: formattedTime,
+                formatted_full: `${dateParts.formatted_full_date} at ${formattedTime}`
+              };
+            })
+          );
+        } catch (error) {
+          console.error(`PRODUCTION: Error scanning ${stylist.name} (${window.start}-${window.end}):`, error.message);
+          return [];
+        }
+      });
 
-      } catch (error) {
-        console.error(`PRODUCTION: Error scanning ${stylist.name}:`, error.message);
-        return [];
-      }
+      const windowResults = await Promise.all(windowScans);
+
+      // Combine and deduplicate by startTime
+      const seenTimes = new Set();
+      return windowResults.flat().filter(slot => {
+        if (seenTimes.has(slot.startTime)) return false;
+        seenTimes.add(slot.startTime);
+        return true;
+      });
     });
 
     const allResults = await Promise.all(scanPromises);
@@ -327,11 +349,12 @@ app.get('/health', (req, res) => {
     environment: 'PRODUCTION',
     location: 'Phoenix Encanto',
     service: 'Find Soonest Available',
-    version: '2.0.0',
+    version: '2.1.0',
     description: 'Hard-coded: scans all barbers, now to 3 days out. Supports additional_services for add-ons.',
     features: [
       'DYNAMIC active employee fetching (1-hour cache)',
-      'formatted date fields (day_of_week, formatted_date, formatted_time, formatted_full)'
+      'formatted date fields (day_of_week, formatted_date, formatted_time, formatted_full)',
+      'full slot retrieval (6 parallel 3-hour scans to bypass 8-slot API limit)'
     ],
     stylists: 'dynamic (fetched from Meevo API)'
   });
