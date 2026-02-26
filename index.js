@@ -1,5 +1,5 @@
 /**
- * Find Soonest Available - PRODUCTION (Phoenix Encanto) v2.2.0
+ * Find Soonest Available - PRODUCTION (Phoenix Encanto)
  *
  * Hard-coded function that scans ALL barbers for the soonest available slot
  * from current time to 3 days out. NO INPUT REQUIRED from the agent.
@@ -57,11 +57,7 @@ const SERVICE_MAP = {
   'shampoo': '67c644bc-237f-4794-8b48-ac150106d5ae',
   'grooming': '65ee2a0d-e995-4d8d-a286-ac150106994b',
   'beard': '65ee2a0d-e995-4d8d-a286-ac150106994b',
-  'beard_trim': '65ee2a0d-e995-4d8d-a286-ac150106994b',
-  'beard trim': '65ee2a0d-e995-4d8d-a286-ac150106994b',
-  'beard & mustache grooming': '65ee2a0d-e995-4d8d-a286-ac150106994b',
-  'beard and mustache': '65ee2a0d-e995-4d8d-a286-ac150106994b',
-  'mustache': '65ee2a0d-e995-4d8d-a286-ac150106994b'
+  'beard_trim': '65ee2a0d-e995-4d8d-a286-ac150106994b'
 };
 
 // Helper to resolve service name to ID
@@ -322,30 +318,10 @@ app.post('/find-soonest', async (req, res) => {
     }
 
     allOpenings.sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+    const earliest = allOpenings[0];
 
-    // Filter out slots too close to current Arizona time (minimum 30-minute lead time).
-    // This prevents the AI from seeing a slot only minutes away, deciding it's "too soon",
-    // then offering "tomorrow" with the SAME stylist — who may not work tomorrow.
-    // Arizona is always UTC-7 (no DST), so we append -07:00 to Meevo's tz-naive timestamps.
-    const MIN_LEAD_MINUTES = 30;
-    const nowAZ = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Phoenix' }));
-    const cutoff = new Date(nowAZ.getTime() + MIN_LEAD_MINUTES * 60 * 1000);
-    const bookableOpenings = allOpenings.filter(slot => new Date(slot.startTime + '-07:00') >= cutoff);
-
-    if (bookableOpenings.length === 0) {
-      return res.json({
-        success: true,
-        found: false,
-        message: 'No bookable slots found — all openings are within the next 30 minutes or no openings exist in the next 3 days',
-        date_range: { start: startDate, end: endDate },
-        barbers_scanned: activeStylists.length
-      });
-    }
-
-    const earliest = bookableOpenings[0];
-
-    console.log(`PRODUCTION: Found ${allOpenings.length} total openings, ${bookableOpenings.length} bookable (30+ min lead time)`);
-    console.log(`Earliest bookable: ${earliest.startTime} with ${earliest.employee_name}`);
+    console.log(`PRODUCTION: Found ${allOpenings.length} total openings`);
+    console.log(`Earliest: ${earliest.startTime} with ${earliest.employee_name}`);
 
     return res.json({
       success: true,
@@ -361,10 +337,10 @@ app.post('/find-soonest', async (req, res) => {
         formatted_time: earliest.formatted_time,
         formatted_full: earliest.formatted_full
       },
-      total_openings_found: bookableOpenings.length,
+      total_openings_found: allOpenings.length,
       barbers_scanned: activeStylists.length,
       date_range: { start: startDate, end: endDate },
-      all_openings: bookableOpenings.slice(0, 100),
+      all_openings: allOpenings.slice(0, 100),
       message: `Next available: ${earliest.formatted_full} with ${earliest.employee_name}`
     });
 
@@ -383,13 +359,12 @@ app.get('/health', (req, res) => {
     environment: 'PRODUCTION',
     location: 'Phoenix Encanto',
     service: 'Find Soonest Available',
-    version: '2.2.0',
-    description: 'Hard-coded: scans all barbers, now to 3 days out. Supports additional_services for add-ons. 30-min minimum lead time filter.',
+    version: '2.1.0',
+    description: 'Hard-coded: scans all barbers, now to 3 days out. Supports additional_services for add-ons.',
     features: [
       'DYNAMIC active employee fetching (1-hour cache)',
       'formatted date fields (day_of_week, formatted_date, formatted_time, formatted_full)',
-      'full slot retrieval (15 overlapping 2hr windows to bypass 8-slot API limit)',
-      '30-minute minimum lead time filter (prevents AI date-shift + wrong-stylist bug)'
+      'full slot retrieval (6 parallel 3-hour scans to bypass 8-slot API limit)'
     ],
     stylists: 'dynamic (fetched from Meevo API)'
   });
